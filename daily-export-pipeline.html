@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daily Export Pipeline — Handoff Package</title>
+<style>
+  :root {
+    --bg: #f7f6f3;
+    --panel: #ffffff;
+    --ink: #23281f;
+    --muted: #6b7263;
+    --accent: #3d5a3d;
+    --accent-soft: #e4ebe0;
+    --line: #dcdad2;
+    --code-bg: #22261f;
+    --code-ink: #e8e6da;
+    --mono: "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.6 Georgia, "Times New Roman", serif;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 48px 24px 96px; }
+  header { border-bottom: 3px solid var(--accent); padding-bottom: 24px; margin-bottom: 32px; }
+  h1 { font-size: 34px; margin: 0 0 8px; letter-spacing: -0.5px; }
+  .sub { color: var(--muted); font-size: 17px; margin: 0; }
+  .meta { font-family: var(--mono); font-size: 12.5px; color: var(--muted); margin-top: 14px; }
+  h2 {
+    font-size: 22px; margin: 44px 0 14px; padding-top: 8px;
+    border-top: 1px solid var(--line);
+  }
+  h2 .tag {
+    display: inline-block; font-family: var(--mono); font-size: 11px;
+    background: var(--accent-soft); color: var(--accent);
+    padding: 2px 8px; border-radius: 3px; vertical-align: middle; margin-left: 10px;
+    letter-spacing: 0.5px;
+  }
+  p, li { max-width: 74ch; }
+  .pipeline {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 18px 22px; font-family: var(--mono); font-size: 13px; line-height: 1.9;
+    overflow-x: auto; white-space: pre; color: var(--ink);
+  }
+  .props { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 18px 0; padding: 0; list-style: none; }
+  .props li {
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 4px; padding: 12px 14px; font-size: 14.5px;
+  }
+  .props b { display: block; font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--accent); margin-bottom: 4px; }
+  .filebox { position: relative; margin: 16px 0 8px; }
+  .filebar {
+    display: flex; justify-content: space-between; align-items: center;
+    background: #2e3329; color: #cdd3c2; border-radius: 6px 6px 0 0;
+    padding: 8px 14px; font-family: var(--mono); font-size: 13px;
+  }
+  .copy-btn {
+    font-family: var(--mono); font-size: 12px; cursor: pointer;
+    background: transparent; color: #cdd3c2; border: 1px solid #4a5140;
+    border-radius: 4px; padding: 4px 12px;
+  }
+  .copy-btn:hover { background: #3a4033; }
+  .copy-btn:focus-visible { outline: 2px solid #9fb08a; outline-offset: 2px; }
+  pre.code {
+    margin: 0; background: var(--code-bg); color: var(--code-ink);
+    border-radius: 0 0 6px 6px; padding: 18px; overflow-x: auto;
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+    tab-size: 2; max-height: 560px;
+  }
+  details > summary {
+    cursor: pointer; font-weight: bold; padding: 6px 0; color: var(--accent);
+    list-style-position: inside;
+  }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; font-size: 14.5px; background: var(--panel); }
+  th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+  th { background: var(--accent-soft); font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px; }
+  code.inline { font-family: var(--mono); font-size: 0.87em; background: #ebe9e2; padding: 1px 5px; border-radius: 3px; }
+  .callout {
+    border: 1px solid var(--line); border-left: 4px solid var(--accent);
+    background: var(--panel); border-radius: 4px; padding: 12px 16px; margin: 16px 0; font-size: 15px;
+  }
+  nav.toc { font-family: var(--mono); font-size: 13px; margin-top: 10px; }
+  nav.toc a { color: var(--accent); text-decoration: none; margin-right: 18px; }
+  nav.toc a:hover { text-decoration: underline; }
+  @media (max-width: 640px) { h1 { font-size: 26px; } pre.code { font-size: 11.5px; } }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  @media print { pre.code { max-height: none; } .copy-btn { display: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>Daily Export Pipeline</h1>
+  <p class="sub">Spring Boot + JobRunr nightly job: DB &rarr; batched HTTP enrichment (2 independent services) &rarr; gzipped CSV &rarr; multipart upload to <code class="inline">ms-storage</code> (the GCP access microservice).</p>
+  <p class="meta">Java 21 &middot; Spring Boot 3 &middot; JobRunr &middot; no Spring Batch &middot; prototype for adaptation &middot; 2026-08-20</p>
+  <nav class="toc">
+    <a href="#design">Design</a>
+    <a href="#java">DailyExportJob.java</a>
+    <a href="#yaml">application.yml</a>
+    <a href="#gateway">ms-storage changes</a>
+    <a href="#todo">Adaptation checklist</a>
+  </nav>
+</header>
+
+<h2 id="design">1. Design summary</h2>
+<div class="pipeline">JobRunr cron 0 0 * * * (Europe/Paris)  &mdash;  distributed lock, retries=5, no dashboard
+   &rarr; for each missing businessDate (catch-up), then J-1:
+        dailyExport(businessDate)                      // ONE DATE = ONE IDEMPOTENT RUN
+          &boxur; keyset pagination over [date, date+1)      // constant memory, no OFFSET
+          &boxur; enrichment: batches of 100 &rarr; services A and B called in parallel per batch (independent) &rarr; virtual threads, Semaphore(8) + retry(3, backoff+jitter) PER service
+          &boxur; append to export-{date}.csv.gz.tmp        // GZIPOutputStream + BufferedWriter, flush/chunk
+          &boxur; multipart POST to ms-storage               // FileSystemResource: streams from disk
+          &boxur; markCompleted(date) only after HTTP 200   // ms-storage acks only after GCS close()
+          &boxur; finally: delete tmp file
+   &rarr; any failure at any step: JobRunr replays the whole date (safe: idempotent by filename)</div>
+
+<ul class="props">
+  <li><b>Resilience</b>Coarse-grained retry: replaying a date is the answer to every failure. GCS object atomicity + filename idempotency make replays safe.</li>
+  <li><b>Efficiency</b>Memory is O(chunk), never O(dataset). Gzip cuts disk/network ~5&ndash;10&times;. Upload is a short, full-throughput connection.</li>
+  <li><b>Simplicity</b>~300 lines, one dependency added (JobRunr). Hand-rolled retry and CSV escaping to stay dependency-light.</li>
+  <li><b>Unbounded data</b>Keyset pagination + streaming append + streamed multipart. Memory stays constant regardless of volume; only local disk is consumed, and gzip keeps that small.</li>
+</ul>
+
+<h2 id="java">2. DailyExportJob.java <span class="tag">SINGLE FILE &middot; PROTOTYPE</span></h2>
+<p>Placeholders to replace are marked <code class="inline">TODO adapt</code>: <code class="inline">fetchChunk</code> (keyset SQL in comment), <code class="inline">enrichBatchFromServiceA/B</code>, <code class="inline">findMissingDates</code>/<code class="inline">markCompleted</code> (the <code class="inline">daily_export</code> status table), plus the <code class="inline">ms-storage</code> URL (default <code class="inline">http://ms-storage/api/exports</code>).</p>
+<div class="filebox">
+  <div class="filebar"><span>src/main/java/com/example/export/DailyExportJob.java</span>
+    <button class="copy-btn" onclick="copyCode('code-java', this)">Copy</button></div>
+  <pre class="code" id="code-java">/*
+ * ============================================================================
+ *  DAILY EXPORT PIPELINE — single-file prototype
+ * ============================================================================
+ *  Design: JobRunr recurring job (midnight Europe/Paris)
+ *          -&gt; keyset pagination over the business-date window
+ *          -&gt; enrichment via batched HTTP calls to TWO independent services,
+ *             called in parallel per batch (virtual threads, one semaphore
+ *             and one retry per service)
+ *          -&gt; streaming append to a gzipped temp CSV file (constant memory)
+ *          -&gt; short multipart upload to ms-storage (the microservice centralising GCP access)
+ *          -&gt; mark date COMPLETED only after the 200 ack
+ *          -&gt; any failure: JobRunr retries the whole date (idempotent by design)
+ *
+ *  Required dependencies (pom.xml):
+ *    org.jobrunr:jobrunr-spring-boot-3-starter   (job orchestration: lock, retry)
+ *    spring-boot-starter-web                     (RestClient)
+ *    spring-boot-starter-jdbc                    (JobRunr storage + your queries)
+ *
+ *  Required application.yml: see the application.yml file next to this one
+ *  (background-job-server enabled, dashboard disabled).
+ *
+ * ============================================================================
+ *  CHANGES NEEDED IN ms-storage (the receiving microservice) — see also
+ *  the comments in uploadToMsStorage() below:
+ * ============================================================================
+ *  1. MULTIPART SIZE LIMITS — the defaults (1MB/10MB) will reject real files:
+ *       spring.servlet.multipart.max-file-size: 2GB      (or -1 for unlimited)
+ *       spring.servlet.multipart.max-request-size: 2GB
+ *     Also raise the ingress/gateway body-size limit in front of it, e.g. for
+ *     nginx-ingress:  nginx.ingress.kubernetes.io/proxy-body-size: &quot;2g&quot;
+ *     and its read timeout for large transfers:
+ *                     nginx.ingress.kubernetes.io/proxy-read-timeout: &quot;600&quot;
+ *
+ *  2. THE FILE IS GZIPPED (.csv.gz) — decide ONE of:
+ *       a) Store as-is in GCS (recommended: cheaper, faster). Set the blob
+ *          metadata contentType=&quot;text/csv&quot; and contentEncoding=&quot;gzip&quot; so GCS
+ *          serves it transparently decompressed to HTTP clients.
+ *       b) Decompress on the fly before writing to GCS:
+ *          new GZIPInputStream(file.getInputStream()) -&gt; WriteChannel.
+ *
+ *  3. STREAM, DON&#x27;T BUFFER — in the endpoint, never call file.getBytes().
+ *     Use file.getInputStream().transferTo(Channels.newOutputStream(
+ *         storage.writer(blobInfo)))   // google-cloud-storage WriteChannel
+ *     (Spring multipart already spools the upload to a temp file on disk,
+ *      so heap usage stays constant.)
+ *
+ *  4. IDEMPOTENCY — use the received filename (export-{date}.csv.gz) as the
+ *     GCS object name. Re-uploading the same date must overwrite (default
+ *     GCS behaviour) or be ignored — never duplicated.
+ *
+ *  5. ACK SEMANTICS — return 200 ONLY after the GCS WriteChannel.close()
+ *     succeeds (the object is atomic: visible only on successful close).
+ *     On any exception return 5xx so this job&#x27;s retry kicks in.
+ * ============================================================================
+ */
+package com.example.export;
+
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
+import java.util.zip.GZIPOutputStream;
+
+import org.jobrunr.jobs.annotations.Job;
+import org.jobrunr.scheduling.JobScheduler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestClient;
+
+@SpringBootApplication
+public class DailyExportJob {
+
+  public static void main(String[] args) {
+    SpringApplication.run(DailyExportJob.class, args);
+  }
+
+  /**
+   * Registers the recurring trigger. JobRunr guarantees single-instance
+   * execution (distributed lock via its DB tables) and gives retries with backoff.
+   */
+  @Bean
+  CommandLineRunner registerRecurringJob(JobScheduler scheduler, ExportService service) {
+    return args -&gt;
+        scheduler.&lt;ExportService&gt;scheduleRecurrently(
+            &quot;daily-export&quot;,                       // stable id -&gt; updates, never duplicates
+            &quot;0 0 * * *&quot;,                          // midnight...
+            ZoneId.of(&quot;Europe/Paris&quot;),            // ...Paris time (DST-safe)
+            ExportService::runDailyWithCatchUp);
+  }
+
+  @Bean
+  RestClient restClient(RestClient.Builder builder) {
+    // JdkClientHttpRequestFactory streams request bodies (no full-file buffering
+    // in memory during the multipart upload). Give it a generous read timeout:
+    // ms-storage answers only after the GCS upload completes.
+    var factory = new JdkClientHttpRequestFactory();
+    factory.setReadTimeout(Duration.ofMinutes(10));
+    return builder.requestFactory(factory).build();
+  }
+
+  // ==========================================================================
+
+  @Service
+  public static class ExportService {
+
+    private static final Logger log = LoggerFactory.getLogger(ExportService.class);
+
+    private static final int CHUNK_SIZE = 1_000;        // rows fetched per DB page
+    private static final int ENRICH_BATCH_SIZE = 100;   // items per enrichment HTTP call
+    // One limit PER enrichment service: an incident/slowdown on one service
+    // must not throttle the calls to the other one.
+    private static final int MAX_CONCURRENT_HTTP_A = 8; // in-flight batches to service A
+    private static final int MAX_CONCURRENT_HTTP_B = 8; // in-flight batches to service B
+    private static final int ENRICH_RETRIES = 3;
+
+    private final RestClient restClient;
+
+    // TODO adapt: URL of ms-storage (service name in your k8s namespace)
+    private static final String MS_STORAGE_UPLOAD_URL = &quot;http://ms-storage/api/exports&quot;;
+
+    public ExportService(RestClient restClient) {
+      this.restClient = restClient;
+    }
+
+    /**
+     * Entry point of the recurring trigger. Handles catch-up: processes every
+     * business date not yet COMPLETED, oldest first, each as an independent,
+     * idempotent, replayable unit.
+     */
+    public void runDailyWithCatchUp() {
+      LocalDate yesterday = LocalDate.now(ZoneId.of(&quot;Europe/Paris&quot;)).minusDays(1);
+      for (LocalDate date : findMissingDates(yesterday)) {
+        dailyExport(date);
+      }
+    }
+
+    /**
+     * ONE DATE = ONE IDEMPOTENT RUN. Any failure anywhere -&gt; JobRunr retries
+     * the whole method with backoff; replaying a date is safe end-to-end
+     * (same window, same filename, ms-storage overwrites in GCS).
+     */
+    @Job(name = &quot;daily-export-%0&quot;, retries = 5)
+    public void dailyExport(LocalDate businessDate) {
+      log.info(&quot;Starting daily export for {}&quot;, businessDate);
+      Path tmp = null;
+      try {
+        tmp = Files.createTempFile(&quot;export-&quot; + businessDate, &quot;.csv.gz.tmp&quot;);
+
+        long written = enrichAndWriteCsv(businessDate, tmp);
+        log.info(&quot;Export {}: {} rows written to {}&quot;, businessDate, written, tmp);
+
+        uploadToMsStorage(businessDate, tmp);
+        markCompleted(businessDate);
+        log.info(&quot;Export {} completed&quot;, businessDate);
+
+      } catch (IOException e) {
+        throw new UncheckedIOException(e); // let JobRunr retry the date
+      } finally {
+        deleteQuietly(tmp);
+      }
+    }
+
+    // ========================================================================
+    // Pipeline core: DB chunks -&gt; enrichment batches -&gt; gzip CSV append.
+    // Constant memory: O(CHUNK_SIZE), never O(dataset).
+    // ========================================================================
+
+    private long enrichAndWriteCsv(LocalDate businessDate, Path tmp) throws IOException {
+      long totalWritten = 0;
+      long failedItems = 0;
+
+      try (var out = Files.newOutputStream(tmp);
+           var gzip = new GZIPOutputStream(out, 64 * 1024);
+           var writer = new BufferedWriter(
+               new OutputStreamWriter(gzip, StandardCharsets.UTF_8))) {
+
+        writeCsvLine(writer, List.of(&quot;id&quot;, &quot;name&quot;, &quot;field_a&quot;, &quot;field_b&quot;)); // header — TODO adapt
+
+        // Bounded-concurrency enrichment: virtual threads make blocking HTTP
+        // calls cheap. The two enrichment services are INDEPENDENT, so each
+        // batch calls A and B in parallel; each service has its own semaphore
+        // and its own retry (a failure on B never replays the call to A).
+        try (ExecutorService vt = Executors.newVirtualThreadPerTaskExecutor()) {
+          Semaphore permitsA = new Semaphore(MAX_CONCURRENT_HTTP_A);
+          Semaphore permitsB = new Semaphore(MAX_CONCURRENT_HTTP_B);
+
+          long lastSeenId = 0;
+          while (true) {
+            // --- 1. keyset-paginated chunk over the frozen calendar window ---
+            List&lt;SourceRow&gt; chunk = fetchChunk(businessDate, lastSeenId, CHUNK_SIZE);
+            if (chunk.isEmpty()) break;
+            lastSeenId = chunk.getLast().id();
+
+            // --- 2. fan out enrichment batches for this chunk; inside each
+            //        batch, fork the two independent service calls ---
+            List&lt;Future&lt;List&lt;EnrichedRow&gt;&gt;&gt; futures = new ArrayList&lt;&gt;();
+            for (List&lt;SourceRow&gt; batch : partition(chunk, ENRICH_BATCH_SIZE)) {
+              futures.add(vt.submit(() -&gt; {
+                Future&lt;Map&lt;Long, String&gt;&gt; fromA = vt.submit(() -&gt;
+                    withPermit(permitsA, () -&gt;
+                        withRetry(() -&gt; enrichBatchFromServiceA(batch), ENRICH_RETRIES)));
+                Future&lt;Map&lt;Long, String&gt;&gt; fromB = vt.submit(() -&gt;
+                    withPermit(permitsB, () -&gt;
+                        withRetry(() -&gt; enrichBatchFromServiceB(batch), ENRICH_RETRIES)));
+                return merge(batch, fromA.get(), fromB.get()); // latency = max(A, B)
+              }));
+            }
+
+            // --- 3. collect (chunk-local join keeps ordering deterministic
+            //        per chunk and memory bounded) and append to the CSV ---
+            for (Future&lt;List&lt;EnrichedRow&gt;&gt; f : futures) {
+              try {
+                for (EnrichedRow row : f.get()) {
+                  writeCsvLine(writer, List.of(
+                      String.valueOf(row.id()), row.name(),
+                      row.fieldA(), row.fieldB()));
+                  totalWritten++;
+                }
+              } catch (Exception e) {
+                // Partial-failure policy: a batch that failed after all retries
+                // is EXCLUDED from the file and counted; the run survives.
+                // TODO adapt if you prefer: mark rows FAILED in DB for later replay.
+                failedItems += ENRICH_BATCH_SIZE;
+                log.warn(&quot;Enrichment batch dropped after {} retries&quot;, ENRICH_RETRIES, e);
+              }
+            }
+            writer.flush(); // durability point after each chunk
+            log.debug(&quot;Chunk done, lastSeenId={}, written={}&quot;, lastSeenId, totalWritten);
+          }
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          throw new IllegalStateException(&quot;Export interrupted&quot;, e);
+        }
+      }
+
+      if (failedItems &gt; 0) {
+        log.warn(&quot;Export {}: {} items excluded due to enrichment failures&quot;,
+            businessDate, failedItems);
+      }
+      return totalWritten;
+    }
+
+    // ========================================================================
+    // Delivery: short, full-throughput multipart upload of the finished file.
+    // ========================================================================
+
+    private void uploadToMsStorage(LocalDate businessDate, Path file) {
+      String filename = &quot;export-&quot; + businessDate + &quot;.csv.gz&quot;; // idempotency key downstream
+
+      MultiValueMap&lt;String, Object&gt; body = new LinkedMultiValueMap&lt;&gt;();
+      // FileSystemResource streams from disk — the file is never loaded in memory.
+      body.add(&quot;file&quot;, new FileSystemResource(file) {
+        @Override public String getFilename() { return filename; }
+      });
+      // Optional explicit metadata part, if ms-storage wants it:
+      body.add(&quot;businessDate&quot;, businessDate.toString());
+
+      /*
+       * MS-STORAGE SIDE (reminder, see file header for the full list):
+       *   @PostMapping(value=&quot;/api/exports&quot;, consumes=MULTIPART_FORM_DATA)
+       *   ResponseEntity&lt;Void&gt; upload(@RequestPart(&quot;file&quot;) MultipartFile file,
+       *                               @RequestPart(&quot;businessDate&quot;) String date) {
+       *     var blob = BlobInfo.newBuilder(BUCKET, file.getOriginalFilename())
+       *         .setContentType(&quot;text/csv&quot;).setContentEncoding(&quot;gzip&quot;).build();
+       *     try (var ch = storage.writer(blob); var in = file.getInputStream()) {
+       *       in.transferTo(Channels.newOutputStream(ch));   // stream, no getBytes()
+       *     }
+       *     return ResponseEntity.ok().build();  // 200 ONLY after successful close()
+       *   }
+       */
+      restClient.post()
+          .uri(MS_STORAGE_UPLOAD_URL)
+          .contentType(MediaType.MULTIPART_FORM_DATA)
+          .body(body)
+          .retrieve()
+          .toBodilessEntity(); // non-2xx -&gt; exception -&gt; JobRunr replays the date
+    }
+
+    // ========================================================================
+    // PLACEHOLDERS — replace with your real implementations
+    // ========================================================================
+
+    /**
+     * TODO adapt — keyset pagination over the calendar window, e.g. with JdbcClient:
+     *   SELECT id, name FROM source_table
+     *   WHERE created_at &gt;= :date AND created_at &lt; :date + 1
+     *     AND id &gt; :afterId
+     *   ORDER BY id
+     *   LIMIT :limit
+     * Requires an index on (created_at, id) or equivalent.
+     */
+    private List&lt;SourceRow&gt; fetchChunk(LocalDate businessDate, long afterId, int limit) {
+      return List.of(); // placeholder: empty -&gt; the loop ends immediately
+    }
+
+    /**
+     * TODO adapt — ONE HTTP call to enrichment service A for a whole batch
+     * (e.g. POST /lookup with the list of ids), using this.restClient.
+     * Returns id -&gt; enriched value. Called from a virtual thread: plain
+     * blocking code is exactly what you want here.
+     */
+    private Map&lt;Long, String&gt; enrichBatchFromServiceA(List&lt;SourceRow&gt; batch) {
+      Map&lt;Long, String&gt; result = new HashMap&lt;&gt;();
+      batch.forEach(r -&gt; result.put(r.id(), &quot;a-&quot; + r.id())); // placeholder
+      return result;
+    }
+
+    /** TODO adapt — same contract as service A, for enrichment service B. */
+    private Map&lt;Long, String&gt; enrichBatchFromServiceB(List&lt;SourceRow&gt; batch) {
+      Map&lt;Long, String&gt; result = new HashMap&lt;&gt;();
+      batch.forEach(r -&gt; result.put(r.id(), &quot;b-&quot; + r.id())); // placeholder
+      return result;
+    }
+
+    /**
+     * Joins the two independent enrichment results back onto the source rows.
+     * getOrDefault covers the case where a service knows nothing about an id
+     * (missing key) — the row is still written, with an empty field.
+     */
+    private static List&lt;EnrichedRow&gt; merge(
+        List&lt;SourceRow&gt; batch, Map&lt;Long, String&gt; fromA, Map&lt;Long, String&gt; fromB) {
+      return batch.stream()
+          .map(r -&gt; new EnrichedRow(r.id(), r.name(),
+              fromA.getOrDefault(r.id(), &quot;&quot;),
+              fromB.getOrDefault(r.id(), &quot;&quot;)))
+          .toList();
+    }
+
+    /**
+     * TODO adapt — persistence of run status for catch-up, e.g. a table
+     *   daily_export(business_date DATE PRIMARY KEY, status TEXT, finished_at TIMESTAMPTZ)
+     * Return all dates &lt;= upToIncluded without status COMPLETED (bounded, e.g.
+     * to the last 30 days, so a fresh install doesn&#x27;t reprocess forever).
+     */
+    private List&lt;LocalDate&gt; findMissingDates(LocalDate upToIncluded) {
+      return List.of(upToIncluded); // placeholder: just process J-1
+    }
+
+    /** TODO adapt — UPSERT daily_export SET status=&#x27;COMPLETED&#x27;. */
+    private void markCompleted(LocalDate businessDate) {}
+
+    // ========================================================================
+    // Small utilities (kept inline to stay dependency-free; for the CSV you
+    // may swap writeCsvLine for jackson-dataformat-csv or commons-csv)
+    // ========================================================================
+
+    private static &lt;T&gt; T withPermit(Semaphore permits, Callable&lt;T&gt; action) throws Exception {
+      permits.acquire();
+      try {
+        return action.call();
+      } finally {
+        permits.release();
+      }
+    }
+
+    private static &lt;T&gt; T withRetry(Callable&lt;T&gt; action, int maxAttempts) throws Exception {
+      Exception last = null;
+      for (int attempt = 1; attempt &lt;= maxAttempts; attempt++) {
+        try {
+          return action.call();
+        } catch (Exception e) {
+          last = e;
+          if (attempt &lt; maxAttempts) {
+            long backoffMs = (long) (Math.pow(2, attempt) * 500
+                + Math.random() * 250); // exponential + jitter
+            Thread.sleep(backoffMs);    // cheap on a virtual thread
+          }
+        }
+      }
+      throw last;
+    }
+
+    private static void writeCsvLine(BufferedWriter w, List&lt;String&gt; fields)
+        throws IOException {
+      StringBuilder sb = new StringBuilder(128);
+      for (int i = 0; i &lt; fields.size(); i++) {
+        if (i &gt; 0) sb.append(&#x27;,&#x27;);
+        sb.append(csvEscape(fields.get(i)));
+      }
+      w.write(sb.append(&#x27;\n&#x27;).toString());
+    }
+
+    private static String csvEscape(String v) {
+      if (v == null) return &quot;&quot;;
+      boolean needsQuoting = v.indexOf(&#x27;,&#x27;) &gt;= 0 || v.indexOf(&#x27;&quot;&#x27;) &gt;= 0
+          || v.indexOf(&#x27;\n&#x27;) &gt;= 0 || v.indexOf(&#x27;\r&#x27;) &gt;= 0;
+      return needsQuoting ? &#x27;&quot;&#x27; + v.replace(&quot;\&quot;&quot;, &quot;\&quot;\&quot;&quot;) + &#x27;&quot;&#x27; : v;
+    }
+
+    private static &lt;T&gt; List&lt;List&lt;T&gt;&gt; partition(List&lt;T&gt; list, int size) {
+      List&lt;List&lt;T&gt;&gt; parts = new ArrayList&lt;&gt;();
+      for (int i = 0; i &lt; list.size(); i += size) {
+        parts.add(list.subList(i, Math.min(i + size, list.size())));
+      }
+      return parts;
+    }
+
+    private static void deleteQuietly(Path p) {
+      if (p == null) return;
+      try {
+        Files.deleteIfExists(p);
+      } catch (IOException e) {
+        LoggerFactory.getLogger(ExportService.class).warn(&quot;Could not delete {}&quot;, p, e);
+      }
+    }
+  }
+
+  // ==========================================================================
+  // Domain records — TODO adapt to your real source/enriched shapes
+  // ==========================================================================
+
+  public record SourceRow(long id, String name) {}
+
+  public record EnrichedRow(long id, String name, String fieldA, String fieldB) {}
+}
+</pre>
+</div>
+
+<h2 id="yaml">3. application.yml <span class="tag">CONFIG</span></h2>
+<p>JobRunr background server on, dashboard off (no port 8000). Replay of a failed date is automatic: JobRunr retries, and the built-in catch-up loop picks up any date not yet COMPLETED at the next midnight run.</p>
+<div class="filebox">
+  <div class="filebar"><span>src/main/resources/application.yml</span>
+    <button class="copy-btn" onclick="copyCode('code-yaml', this)">Copy</button></div>
+  <pre class="code" id="code-yaml">spring:
+  application:
+    name: daily-export
+  datasource:
+    # JobRunr stores its job/lock tables in this same datasource (created
+    # automatically at startup via table-prefix-less migrations).
+    url: jdbc:postgresql://localhost:5432/mydb   # TODO adapt
+    username: myuser                              # TODO adapt
+    password: ${DB_PASSWORD}                      # TODO adapt (env/secret)
+
+org:
+  jobrunr:
+    # Enables the background job processing on this instance. In a multi-pod
+    # deployment leave it enabled everywhere: JobRunr&#x27;s distributed lock
+    # guarantees each job (including the recurring trigger) runs on exactly
+    # one instance.
+    background-job-server:
+      enabled: true
+      # One worker is enough: a single nightly job; the parallelism you need
+      # lives inside the job (virtual threads for enrichment batches).
+      worker-count: 1
+    # Dashboard disabled (false is the default; kept explicit as documentation):
+    # no extra web server / port 8000 started.
+    dashboard:
+      enabled: false
+    database:
+      # Uncomment to isolate JobRunr&#x27;s tables under a prefix/schema if your
+      # DBA conventions require it:
+      # table-prefix: jobrunr_
+      type: sql
+
+logging:
+  level:
+    org.jobrunr: INFO
+    com.example.export: INFO   # DEBUG to see per-chunk progress lines
+</pre>
+</div>
+
+<h2 id="gateway">4. Changes needed in <code class="inline">ms-storage</code></h2>
+<table>
+  <tr><th>#</th><th>Change</th><th>Detail</th></tr>
+  <tr><td>1</td><td>Multipart size limits</td><td><code class="inline">spring.servlet.multipart.max-file-size / max-request-size</code> (defaults 1MB/10MB will reject real files) <em>and</em> the ingress body limit, e.g. <code class="inline">nginx.ingress.kubernetes.io/proxy-body-size: "2g"</code> + <code class="inline">proxy-read-timeout: "600"</code>.</td></tr>
+  <tr><td>2</td><td>Gzip handling</td><td>File arrives as <code class="inline">.csv.gz</code>. Recommended: store as-is with blob metadata <code class="inline">contentType="text/csv"</code>, <code class="inline">contentEncoding="gzip"</code> (GCS serves it transparently decompressed). Alternative: wrap in <code class="inline">GZIPInputStream</code> before writing.</td></tr>
+  <tr><td>3</td><td>Stream, don't buffer</td><td>Never <code class="inline">file.getBytes()</code>. Use <code class="inline">file.getInputStream().transferTo(Channels.newOutputStream(storage.writer(blobInfo)))</code>. Constant heap: Spring multipart already spools to disk.</td></tr>
+  <tr><td>4</td><td>Idempotency</td><td>Use the received filename <code class="inline">export-{date}.csv.gz</code> as the GCS object name; re-upload of the same date must overwrite (GCS default), never duplicate.</td></tr>
+  <tr><td>5</td><td>Ack semantics</td><td>Return 200 <em>only after</em> <code class="inline">WriteChannel.close()</code> succeeds (GCS objects are atomic &mdash; visible only on successful close). Any exception &rarr; 5xx so the job's retry replays the date.</td></tr>
+</table>
+<details>
+<summary>Reference endpoint for ms-storage (~15 lines)</summary>
+<div class="filebox">
+  <div class="filebar"><span>ms-storage: ExportUploadController.java (reference)</span>
+    <button class="copy-btn" onclick="copyCode('code-gw', this)">Copy</button></div>
+  <pre class="code" id="code-gw">@PostMapping(value = "/api/exports", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+public ResponseEntity&lt;Void&gt; upload(@RequestPart("file") MultipartFile file,
+                                   @RequestPart("businessDate") String businessDate) throws IOException {
+  BlobInfo blob = BlobInfo.newBuilder(BUCKET, file.getOriginalFilename())
+      .setContentType("text/csv")
+      .setContentEncoding("gzip")           // stored gzipped, served decompressed
+      .build();
+  try (WriteChannel ch = storage.writer(blob);
+       InputStream in = file.getInputStream()) {
+    in.transferTo(Channels.newOutputStream(ch));   // stream, constant heap
+  }
+  return ResponseEntity.ok().build();        // 200 ONLY after successful close()
+}</pre>
+</div>
+</details>
+
+<h2 id="todo">5. Adaptation checklist (for the implementer / AI assistant)</h2>
+<table>
+  <tr><th>Where</th><th>What to do</th></tr>
+  <tr><td><code class="inline">pom.xml</code></td><td>Add <code class="inline">org.jobrunr:jobrunr-spring-boot-3-starter</code> (+ web, jdbc starters if absent).</td></tr>
+  <tr><td><code class="inline">fetchChunk()</code></td><td>Implement keyset pagination: <code class="inline">WHERE created_at &gt;= :date AND created_at &lt; :date+1 AND id &gt; :afterId ORDER BY id LIMIT :n</code>. Index on <code class="inline">(created_at, id)</code>.</td></tr>
+  <tr><td><code class="inline">enrichBatchFromServiceA/B()</code></td><td>One HTTP call per batch of ~100 ids to each service (e.g. <code class="inline">POST /lookup</code>), returning <code class="inline">Map&lt;id, value&gt;</code>; plain blocking code (runs on a virtual thread). The two calls are independent and run in parallel per batch.</td></tr>
+  <tr><td><code class="inline">daily_export</code> table</td><td><code class="inline">(business_date DATE PK, status TEXT, finished_at TIMESTAMPTZ)</code>; implement <code class="inline">findMissingDates</code> (bounded, e.g. last 30 days) and <code class="inline">markCompleted</code> (UPSERT).</td></tr>
+  <tr><td>Records</td><td>Adapt <code class="inline">SourceRow</code> / <code class="inline">EnrichedRow</code> and the CSV header/columns to the real schema.</td></tr>
+</table>
+
+<div class="callout"><b>Accepted trade-off:</b> a crash mid-run replays the whole date, including enrichment HTTP calls (GETs, possibly proxy-cached &mdash; treated as a bonus, not an assumption). If volumes ever make replays expensive, add an <code class="inline">enrichment_cache(item_id, run_date, payload)</code> table (~20 lines) without touching the rest.</div>
+
+</div>
+<script>
+function copyCode(id, btn) {
+  const text = document.getElementById(id).innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    const old = btn.textContent;
+    btn.textContent = "Copied";
+    setTimeout(() => { btn.textContent = old; }, 1500);
+  });
+}
+</script>
+</body>
+</html>
